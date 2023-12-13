@@ -104,6 +104,141 @@ class BCModel(nn.Module):
         out = nn.Sigmoid()(out)
         return out
 ```
+## 4. 학습(train)
+```python
+import time
+## 하이퍼파라미터
+LR = 0.001
+N_EPOCH = 1000
+
+# 모델 생성
+model = BCModel().to(device)
+# loss 함수
+loss_fn = nn.BCELoss() # binary cross entropy loss
+# optimizer
+optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+
+s = time.time()
+######################### 
+# 에폭별 검증 -> train loss, validation loss, validation accuracy
+# 조기종료(Early Stopping) - 성능 개선이 안되면 학습을 중단
+# 가장 좋은 성능을 내는 에폭의 모델을 저장. 
+#  조기종료/모델 저장 ==> validation loss 기준.
+######################### 
+
+## 결과 저장할 리스트
+train_loss_list, valid_loss_list, valid_acc_list = [], [], []
+
+### 모델 저장, 조기종료 관련 변수
+best_score = torch.inf  # valid loss
+save_bcmodel_path = "models/bc_best_model.pth"
+
+patience = 20  # 성능이 개선 될때 까지 몇 에폭 기다릴 것인지.
+trigger_cnt = 0 # 성능이 개선 될때 까지 현재 몇번째 기다렸는지.
+
+
+for epoch in range(N_EPOCH):
+    
+    # train
+    model.train()
+    train_loss = 0.0
+    for X_train, y_train in train_loader:
+        # 한 step
+        X_train, y_train = X_train.to(device), y_train.to(device)
+        pred_train = model(X_train) # 예측
+        loss = loss_fn(pred_train, y_train) # 오차계산
+        # 파라미터 업데이트
+        optimizer.zero_grad() # 초기화
+        loss.backward() # grad 계산
+        optimizer.step() # 파라미터 update
+        
+        train_loss += loss.item()
+    train_loss /= len(train_loader) # 현재 epoch의 평균 train loss 계산
+    
+    #### 검증(validation)
+    model.eval()
+    valid_loss, valid_acc = 0.0, 0.0
+    with torch.no_grad():
+        for X_valid, y_valid in test_loader:
+            X_valid, y_valid = X_valid.to(device), y_valid.to(device)
+            pred_valid = model(X_valid) # 값: 1개 - positive일 확률 ==> Loss 계산
+            pred_label = (pred_valid > 0.5).type(torch.int32)  # label ==> 정확도 계산
+            
+            # loss
+            loss_valid = loss_fn(pred_valid, y_valid)
+            valid_loss += loss_valid.item()
+            # 정확도
+            valid_acc += torch.sum(pred_label == y_valid).item()
+    # valid 검증 결과 계산
+    valid_loss /= len(test_loader)
+    valid_acc /= len(test_loader.dataset)
+    
+    print(f"[{epoch+1}/{N_EPOCH}] train loss: {train_loss}, valid loss: {valid_loss}, valid accuracy: {valid_acc}")
+    train_loss_list.append(train_loss)
+    valid_loss_list.append(valid_loss)
+    valid_acc_list.append(valid_acc)
+    
+    ##### 모델 저장 및 조기종료 처리
+    if valid_loss < best_score: # 성능 개선
+        print(f"===> {epoch+1}에폭에서 모델 저장. 이전 score: {best_score}, 현재 score: {valid_loss}")
+        torch.save(model, save_bcmodel_path)
+        best_score = valid_loss
+        trigger_cnt = 0
+    else: # 성능개선이 안됨.
+        trigger_cnt += 1
+        if patience == trigger_cnt: # 조기종료
+            print(f"######## Early Stop: {epoch+1}")
+            break
+    
+    
+e = time.time()
+print(f"학습시간: {e-s}초")
+```
+## 5. 학습 시각화
+```python
+plt.plot(train_loss_list, label="train")
+plt.plot(valid_loss_list, label="validation")
+plt.ylim(0, 0.1)
+plt.legend()
+plt.show()
+```
+![dfd](https://github.com/jsj5605/binary-classification/assets/141815934/803df189-24db-492f-8072-ad0eef39b1fb)
+
+## 6. 모델 평가
+```python
+best_model = torch.load(save_bcmodel_path)
+pred_new = best_model(X_test_tensor)
+pred_new.shape
+
+pred_new[:5]
+
+output:
+tensor([[9.9998e-01],
+        [9.9998e-01],
+        [1.0429e-05],
+        [9.9850e-01],
+        [9.9959e-01]], grad_fn=<SliceBackward0>)
+
+# 확률->class index
+pred_new_label = (pred_new > 0.5).type(torch.int32)
+pred_new_label[:5]
+
+output:
+tensor([[1],
+        [1],
+        [0],
+        [1],
+        [1]], dtype=torch.int32)
+
+y_test_tensor[:5]
+
+output:
+tensor([[1.],
+        [1.],
+        [0.],
+        [1.],
+        [1.]])
+```
 
 
 
